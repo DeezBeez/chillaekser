@@ -1,59 +1,134 @@
-use std::fs::{self, File, OpenOptions};
-use std::collections::HashMap;
-use std::io::{Read, Seek, Write};
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
-pub struct Config {
-    pub settings: HashMap<String, String>,
-    pub channel_names: HashMap<String, String>,
-    settings_file: File,
-    channel_file: File
-}
+use anyhow::Context;
+use tokio::{
+    fs::{DirBuilder, File, OpenOptions},
+    io::{AsyncReadExt, AsyncWriteExt},
+};
+
+const CONFIG_PATH: &str = "./Config/";
+const SETTINGS_FILE_NAME: &str = "Settings.json";
+//const CHANNEL_FILE_NAME: &str = "Channels.json";
+
+pub struct Config {}
 
 impl Config {
-    pub fn new(settings_path: &str, channel_path: &str) -> Self {
-        let mut set: HashMap<String, String>  = HashMap::new();
-        let mut can: HashMap<String, String> = HashMap::new();
-
-        let s_p = Path::new(settings_path);
-        fs::create_dir(s_p.parent().unwrap()).unwrap();
-
-        let c_p = Path::new(channel_path);
-        fs::create_dir(c_p.parent().unwrap()).unwrap();
-
-        let mut open_options = OpenOptions::new();
-        open_options.append(false).read(true).write(true).create(true);
-        let mut settings_file: File = open_options.open(settings_path).expect("Failed to open settings file!");
-
-        let mut buffer = String::new();
-        settings_file.read_to_string(&mut buffer).unwrap();
-        if buffer.is_empty() {
-            buffer = serde_json::ser::to_string(&set).unwrap();
+    pub async fn create_settings_file() -> anyhow::Result<()> {
+        // Settings Path
+        let settings_path = format!("{}{}", CONFIG_PATH, SETTINGS_FILE_NAME);
+        let settings_path = Path::new(&settings_path);
+        if settings_path.exists() {
+            println!("Settings file already exists!");
+            return Ok(());
         }
-        set = serde_json::from_str(&buffer).unwrap();
-
-        let mut channel_file: File = open_options.open(channel_path).expect("Failed to open channels file!");
-        buffer = String::new();
-        channel_file.read_to_string(&mut buffer).unwrap();
-        if buffer.is_empty() {
-            buffer = serde_json::ser::to_string(&can).unwrap();
-        }        
-        can = serde_json::from_str(&buffer).unwrap();
-        
-        Config { 
-            settings: set, 
-            channel_names: can,
-            settings_file: settings_file,
-            channel_file: channel_file
+        // Create Config Folder if it doesnt exist
+        let path: &Path = Path::new(CONFIG_PATH);
+        if !path.exists() {
+            DirBuilder::new()
+                .create(path)
+                .await
+                .context("Failed to create directory")?;
         }
+
+        // Create Settings HashMap
+        let mut settings: HashMap<String, String> = HashMap::new();
+        settings.insert("token".to_string(), "NO_TOKEN".to_string());
+        settings.insert(
+            "create_channel_name".to_string(),
+            "+ create channel".to_string(),
+        );
+        settings.insert(
+            "create_channel_category".to_string(),
+            "user channel".to_string(),
+        );
+
+        // Create Settings File
+        let mut settings_file: File = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(settings_path)
+            .await
+            .context("Failed to open/create settings file")?;
+        let settings_string = serde_json::ser::to_string_pretty(&settings)?;
+        settings_file.write_all(settings_string.as_bytes()).await?;
+        settings_file.flush().await?;
+        Ok(())
     }
 
-    pub fn add_channel(&mut self, username: String, channel_name: String) {
-        self.channel_names.insert(username, channel_name);
-        let v = serde_json::ser::to_string_pretty(&self.channel_names).expect("Error serializing channel names").trim().to_string();
-        println!("{v}");
-        self.channel_file.set_len(0).unwrap();
-        self.channel_file.seek(std::io::SeekFrom::Start(0)).unwrap();
-        self.channel_file.write_all(v.as_bytes()).expect("Failed to write to channel file!");
+    pub async fn get_token() -> anyhow::Result<String> {
+        let key = "token";
+        let v = match Config::get_setting(key).await {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anyhow::Error::msg(format!(
+                    "Failed to find '{}' in settings file",
+                    key
+                )))
+            }
+        };
+        Ok(v)
+    }
+
+    pub async fn get_create_channel_name() -> anyhow::Result<String> {
+        let key = "create_channel_name";
+        let v = match Config::get_setting(key).await {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anyhow::Error::msg(format!(
+                    "Failed to find '{}' in settings file",
+                    key
+                )))
+            }
+        };
+        Ok(v)
+    }
+
+    pub async fn get_create_channel_category() -> anyhow::Result<String> {
+        let key = "create_channel_category";
+        let v = match Config::get_setting(key).await {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anyhow::Error::msg(format!(
+                    "Failed to find '{}' in settings file",
+                    key
+                )))
+            }
+        };
+        Ok(v)
+    }
+
+    async fn get_setting(search_for: &str) -> anyhow::Result<String> {
+        let mut settings_file = Config::get_readable_settings_file().await?;
+        let mut s = String::new();
+        settings_file.read_to_string(&mut s).await?;
+        let hm: HashMap<String, String> = serde_json::from_str(s.as_str())?;
+        let setting = match hm.get(search_for) {
+            Some(s) => s,
+            None => {
+                return Err(anyhow::Error::msg(
+                    "Failed to find 'token' in settings file",
+                ))
+            }
+        };
+        Ok(setting.to_string())
+    }
+
+    async fn get_readable_settings_file() -> anyhow::Result<File> {
+        // Settings Path
+        let settings_path = format!("{}{}", CONFIG_PATH, SETTINGS_FILE_NAME);
+        let settings_path = Path::new(&settings_path);
+        if !settings_path.exists() {
+            return Err(anyhow::Error::msg(
+                "get_readable_settings_file: Settings file does not exists!",
+            ));
+        }
+        let settings_file = OpenOptions::new()
+            .read(true)
+            .open(settings_path)
+            .await
+            .context("Failed to open settings file")?;
+        Ok(settings_file)
     }
 }
