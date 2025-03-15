@@ -4,8 +4,6 @@ use serenity::all::ChannelType;
 use serenity::all::ClientBuilder;
 use serenity::all::CreateChannel;
 use serenity::all::GuildChannel;
-use serenity::all::GuildId;
-use serenity::all::Member;
 use serenity::all::Ready;
 use serenity::all::VoiceState;
 use serenity::async_trait;
@@ -17,7 +15,7 @@ mod config;
 struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, data_about_bot: Ready) {
+    async fn ready(&self, _ctx: Context, _data_about_bot: Ready) {
         println!("Discord Bot is up and running!")
     }
 
@@ -90,9 +88,10 @@ impl EventHandler for Handler {
                         Ok(_) => (),
                         Err(e) => {
                             println!(
-                                "Error moving {} into {}",
+                                "Error moving {} into {}: {}",
                                 member.display_name(),
-                                channel.name
+                                channel.name,
+                                e
                             )
                         }
                     }
@@ -141,9 +140,10 @@ impl EventHandler for Handler {
                         Ok(_) => (),
                         Err(e) => {
                             println!(
-                                "Error moving {} into {}",
+                                "Error moving {} into {}: {}",
                                 member.display_name(),
-                                channel.name
+                                channel.name,
+                                e
                             )
                         }
                     }
